@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "anubis-adna"
+version = "0.1.0"
+description = "Ancient DNA damage profiler for MetaPhlAn SGBs"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Ketty Bello" },
+    { name = "Nicola Segata",  email = "nicola.segata@unitn.it" },
+    { name = "Frank Maixner",  email = "frank.maixner@eurac.edu" },
+    { name = "Mohamed Sarhan", email = "m.sabrysarhan@gmail.com" },
+]
+keywords = [
+    "ancient DNA", "aDNA", "metagenomics", "MetaPhlAn",
+    "damage", "bioinformatics", "StrainPhlAn",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+]
+dependencies = [
+    "numpy",
+    "pandas",
+    "pysam",
+    "tqdm",
+    "matplotlib",
+    "statsmodels",
+    "pydamage>=1.0",
+]
+
+[project.scripts]
+anubis = "anubis.core:main"
+
+[project.urls]
+Homepage     = "https://github.com/Mummy-Studies/ANUBIS"
+"Bug Tracker" = "https://github.com/Mummy-Studies/ANUBIS/issues"
+
+[tool.setuptools.packages.find]
+include = ["anubis*"]

@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# PyDamage dev clone (local only — installed as a dependency in production)
+pydamage/
+
+# Distribution / packaging
+*.whl
+*.tar.gz
+MANIFEST
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# macOS
+.DS_Store
+
+# Genomics large files (should not be committed)
+*.bam
+*.bai
+*.sam
+*.sam.bz2
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.vcf
+*.vcf.gz
+
+# ANUBIS cache files (auto-generated beside SAM files)
+*.anubis_idx.json.gz
+
+# Test / benchmark output directories (local development artefacts)
+sandbox/
+bench_t*/
+test_*/
+HT*/
+*_damage/
+*_damage[0-9]/
+anubis_*/
+metaphlan2damage_out/
+
+# Standalone script superseded by the package
+anubis.py

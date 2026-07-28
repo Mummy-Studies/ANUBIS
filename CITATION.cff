@@ -1,24 +1,29 @@
-# NB change it
-
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 authors:
   - family-names: Bello
     given-names: Ketty
-    orcid: 
+    orcid:
   - family-names: Segata
     given-names: Nicola
     orcid: https://orcid.org/0000-0002-1583-5794
   - family-names: Maixner
     given-names: Frank
     orcid: https://orcid.org/0000-0003-2846-8994
-  - family-names: Mohamed
-    given-names: Sarhan
+  - family-names: Sarhan
+    given-names: Mohamed
     orcid: https://orcid.org/0000-0003-0904-976X
 
-title: "ANUBIS"
-version: 0.0.0
-identifiers:
-  - type: doi
-    value: 0/zenodo.0
-date-released: 2026-00-100
+title: "ANUBIS: Ancient DNA damage profiler for MetaPhlAn SGBs"
+version: 0.1.0
+date-released: 2025-01-01
+url: "https://github.com/Mummy-Studies/ANUBIS"
+repository-code: "https://github.com/Mummy-Studies/ANUBIS"
+license: MIT
+keywords:
+  - ancient DNA
+  - metagenomics
+  - damage assessment
+  - MetaPhlAn
+  - StrainPhlAn
+  - bioinformatics
