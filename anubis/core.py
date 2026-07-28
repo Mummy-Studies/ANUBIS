@@ -617,7 +617,7 @@ def plot_damage_profile(row: pd.Series, wlen: int, outdir: str) -> None:
 
     Both panels overlay:
       • Observed data as a filled curve (coloured area + line)
-      • Fitted pydamage damage model (geometric decay)
+      • Fitted PyDamage damage model
       • Null model (flat baseline)
     """
     from pydamage.models import damage_model as DamageModel, null_model as NullModel
