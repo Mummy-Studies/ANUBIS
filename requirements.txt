@@ -1,1 +1,7 @@
-insert required packages
+```text 
+PyDamage>=1.0 
+pysam
+numpy
+pandas
+matplotlib
+statsmodels
