@@ -12,7 +12,7 @@ ANUBIS integrates MetaPhlAn shotgun metagenomics profiles with ancient DNA (aDNA
 
 ## Features
 
-- Per-SGB damage assessment — C→T deamination at 5′ end, G→A at 3′ end
+- Per-SGB damage assessment - C→T deamination at 5′ end, G→A at 3′ end
 - Geometric decay damage model with confidence intervals (PyDamage)
 - Benjamini–Hochberg FDR correction across all analysed SGBs
 - Predicted accuracy score (logistic regression GLM)
@@ -157,6 +157,7 @@ anubis -m ... -s ... -o results/ \
 |------|---------|-------------|
 | `--wlen N` | 30 | Damage modelling window length (bp) |
 | `--threads N` | 4 | CPU threads for BAM sorting and PyDamage |
+| `--min_mapq_val N` | 30 | Minimum mapping quality (MAPQ) for a read to be kept |
 
 ### Output
 
@@ -192,8 +193,10 @@ anubis -m ... -s ... -o results/ \
 | `coverage` | Mean read coverage across marker genes |
 | `reflen` | Total marker gene reference length (bp) |
 | `damage_model_pmax` | Maximum damage rate at position 1 (C→T at 5′ end) |
+| `damage_model_pmax_stdev` | Standard deviation of the maximum damage rate |
 | `damage_model_p` | Geometric decay rate of the damage signal |
 | `damage_model_pmin` | Background (asymptotic) deamination rate |
+| `damage_model_pmin_stdev` | Standard deviation of the background deamination rate |
 | `null_model_p0` | Null model substitution rate |
 | `pvalue` | Likelihood-ratio test p-value (damage vs. null model) |
 | `qvalue` | BH-adjusted p-value (FDR across all SGBs in this run) |
