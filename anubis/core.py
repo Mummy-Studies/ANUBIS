@@ -1,5 +1,5 @@
 """
-ANUBIS core — ancient DNA damage profiler for MetaPhlAn SGBs.
+ANUBIS core - ancient DNA damage profiler for MetaPhlAn SGBs.
 
 Entry point: anubis.core:main  (registered as the 'anubis' console script)
 """
@@ -45,7 +45,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-# ── MetaPhlAn parsing ────────────────────────────────────────────────────────
+# -- MetaPhlAn parsing --------------------------------------------------------
 
 def parse_metaphlan(tsv_path: str) -> pd.DataFrame:
     """
@@ -67,7 +67,7 @@ def parse_metaphlan(tsv_path: str) -> pd.DataFrame:
             lineage, ncbi_ids, abundance = parts[0], parts[1], parts[2]
             additional = parts[3] if len(parts) > 3 else ""
 
-            # Only SGB-level rows; strip _group suffix — SAM marker-gene
+            # Only SGB-level rows; strip _group suffix - SAM marker-gene
             # references use the bare numeric SGB ID only.
             m = re.search(r"\|t__SGB(\d+)", lineage)
             if not m:
@@ -123,7 +123,7 @@ def _normalize_clade(token: str) -> str | None:
     return None
 
 
-# ── SAM header index cache ───────────────────────────────────────────────────
+# -- SAM header index cache ---------------------------------------------------
 # Scanning 11M+ @SQ entries in Python takes ~12 s on every run.  After the
 # first scan we write a small gzip-JSON sidecar (<sam>.anubis_idx.json.gz)
 # that maps each SGB to its list of reference dicts.  Subsequent runs load
@@ -141,8 +141,8 @@ def _sam_cache_path(sam_bz2: str) -> str:
 def _load_sam_cache(sam_bz2: str) -> tuple[dict, dict] | None:
     """
     Return (base_header, sgb_index) if a valid cache exists, else None.
-    base_header  — non-SQ header dict (@HD, @RG, @PG …)
-    sgb_index    — {sgb_id: [{"SN": ..., "LN": ...}, …]}
+    base_header  - non-SQ header dict (@HD, @RG, @PG …)
+    sgb_index    - {sgb_id: [{"SN": ..., "LN": ...}, …]}
     """
     path = _sam_cache_path(sam_bz2)
     if not os.path.exists(path):
@@ -152,7 +152,7 @@ def _load_sam_cache(sam_bz2: str) -> tuple[dict, dict] | None:
         with gzip.open(path, "rt") as f:
             data = json.load(f)
         if data.get("mtime") != stat.st_mtime or data.get("size") != stat.st_size:
-            log.info("SAM index cache is stale — will rebuild")
+            log.info("SAM index cache is stale - will rebuild")
             return None
         return data["base_header"], data["index"]
     except Exception as e:
@@ -187,7 +187,7 @@ def _save_sam_cache(
         log.warning("Could not write SAM index cache: %s", e)
 
 
-# ── SAM streaming → per-SGB BAM files ───────────────────────────────────────
+# -- SAM streaming → per-SGB BAM files ---------------------------------------
 
 def _extract_sgb_from_ref(ref_name: str) -> str | None:
     """Return 'SGB12345' if the reference name encodes an SGB, else None."""
@@ -200,11 +200,15 @@ def split_sam_by_sgb(
     target_sgbs: set,
     tmpdir: str,
     threads: int = 1,
+    min_mapq: int = 30,
 ) -> dict:
     """
     Stream the bz2-compressed MetaPhlAn SAM file once.  For each target SGB,
     collect all reads that mapped to its marker genes and write a sorted,
     indexed BAM file.
+
+    Reads with mapping quality below `min_mapq` are dropped before being
+    routed to their per-SGB BAM, so the damage analysis never sees them.
 
     Returns
     -------
@@ -219,7 +223,7 @@ def split_sam_by_sgb(
 
     in_sam = pysam.AlignmentFile(proc.stdout, "r")
 
-    # ── Build per-SGB sub-headers (cache-backed) ─────────────────────────
+    # -- Build per-SGB sub-headers (cache-backed) -------------------------
     sgb_sq: dict[str, list] = {s: [] for s in target_sgbs}
 
     cached = _load_sam_cache(sam_bz2)
@@ -227,7 +231,7 @@ def split_sam_by_sgb(
     missing_from_cache = target_sgbs - set(existing_index.keys())
 
     if not missing_from_cache:
-        log.info("SAM index cache hit — skipping header scan")
+        log.info("SAM index cache hit - skipping header scan")
         base_header = cached_base_header
         for sgb in target_sgbs:
             sgb_sq[sgb] = list(existing_index[sgb])
@@ -257,7 +261,7 @@ def split_sam_by_sgb(
         proc.wait()
         return {}
 
-    # ── Open temporary unsorted BAM writers ─────────────────────────────
+    # -- Open temporary unsorted BAM writers -----------------------------
     unsorted_paths: dict[str, str] = {}
     writers: dict[str, pysam.AlignmentFile] = {}
 
@@ -267,7 +271,7 @@ def split_sam_by_sgb(
         writers[sgb] = pysam.AlignmentFile(unsorted_path, "wb", header=header)
         unsorted_paths[sgb] = unsorted_path
 
-    # ── Build reference-ID remap table ──────────────────────────────────
+    # -- Build reference-ID remap table ----------------------------------
     # BAM stores reference as an integer index into the header's SQ list.
     # Each per-SGB BAM has a small sub-header, so we must translate the
     # original reference_id to the new index before writing each read.
@@ -283,12 +287,16 @@ def split_sam_by_sgb(
             if old_tid >= 0:
                 ref_id_to_sgb[old_tid] = (sgb, new_idx)
 
-    # ── Stream reads → route by SGB ─────────────────────────────────────
-    log.info("Streaming reads → writing per-SGB BAMs …")
+    # -- Stream reads → route by SGB -------------------------------------
+    log.info("Streaming reads → writing per-SGB BAMs (min MAPQ=%d) …", min_mapq)
     routed = {s: 0 for s in present}
+    skipped_mapq = 0
 
     for read in tqdm(in_sam.fetch(until_eof=True), desc="Reads", unit=" reads"):
         if read.is_unmapped:
+            continue
+        if read.mapping_quality < min_mapq:
+            skipped_mapq += 1
             continue
         mapping = ref_id_to_sgb.get(read.reference_id)
         if mapping is None:
@@ -305,8 +313,9 @@ def split_sam_by_sgb(
 
     for s, n in routed.items():
         log.info("  %s → %d reads", s, n)
+    log.info("  Skipped %d reads below MAPQ %d", skipped_mapq, min_mapq)
 
-    # ── Sort and index each BAM (parallel across SGBs) ──────────────────
+    # -- Sort and index each BAM (parallel across SGBs) ------------------
     log.info("Sorting and indexing per-SGB BAMs …")
     sorted_paths: dict[str, str] = {}
 
@@ -337,7 +346,7 @@ def split_sam_by_sgb(
     return sorted_paths
 
 
-# ── PyDamage per-SGB analysis ────────────────────────────────────────────────
+# -- PyDamage per-SGB analysis ------------------------------------------------
 
 def run_pydamage_grouped(
     bam_path: str,
@@ -389,7 +398,7 @@ def analyze_all_sgbs(
     records = []
     read_dicts: dict = {}
 
-    # Parallelise across SGBs — pydamage group mode runs over a single
+    # Parallelise across SGBs - pydamage group mode runs over a single
     # reference per BAM, so its internal `process` parameter gives no
     # benefit; better to run multiple SGBs concurrently instead.
     n_workers = min(processes, len(sgb_bams))
@@ -454,7 +463,7 @@ def analyze_all_sgbs(
     return df, read_dicts
 
 
-# ── Per-SGB BAM processing: rescaling and/or terminal masking ────────────────
+# -- Per-SGB BAM processing: rescaling and/or terminal masking ----------------
 
 def process_sgb_bams(
     sgb_bams: dict,
@@ -471,16 +480,16 @@ def process_sgb_bams(
     """
     Apply rescaling and/or terminal masking directly to the per-SGB BAMs that
     were already produced by split_sam_by_sgb().  This avoids a second full
-    scan of the original (huge) bz2 SAM — the per-SGB BAMs are small and fast
+    scan of the original (huge) bz2 SAM - the per-SGB BAMs are small and fast
     to process.
 
     For each SGB a sorted, indexed BAM is written to <outdir>/<SGB>.bam.
     These are directly consumable by StrainPhlAn's sample2markers.py.
 
-    rescaling  — activated when result_df and read_dicts are provided; only
+    rescaling  - activated when result_df and read_dicts are provided; only
                  SGBs whose predicted_accuracy ≥ rescale_threshold AND
                  q-value ≤ rescale_alpha are rescaled.
-    masking    — activated when mask_5p > 0 or mask_3p > 0; applied to every
+    masking    - activated when mask_5p > 0 or mask_3p > 0; applied to every
                  mapped read regardless of SGB damage status.
 
     Returns {sgb_id: path_to_processed_bam}.
@@ -494,7 +503,7 @@ def process_sgb_bams(
 
     os.makedirs(outdir, exist_ok=True)
 
-    # ── Pre-compute per-SGB damage PMFs ──────────────────────────────────
+    # -- Pre-compute per-SGB damage PMFs ----------------------------------
     sgb_pmf:   dict = {}
     sgb_reads: dict = {}
 
@@ -529,7 +538,7 @@ def process_sgb_bams(
             mask_5p, mask_3p,
         )
 
-    # ── Process each per-SGB BAM ──────────────────────────────────────────
+    # -- Process each per-SGB BAM ------------------------------------------
     def _process_one(sgb: str, bam_in: str) -> tuple:
         bam_out = os.path.join(outdir, f"{sgb}.bam")
         n_rescaled = 0
@@ -606,14 +615,14 @@ def process_sgb_bams(
     return processed
 
 
-# ── Damage profile plots ─────────────────────────────────────────────────────
+# -- Damage profile plots -----------------------------------------------------
 
 def plot_damage_profile(row: pd.Series, wlen: int, outdir: str) -> None:
     """
     Classic aDNA damage profile plot for one SGB.
 
-    Left panel  – C→T substitution frequency from the 5' end.
-    Right panel – G→A substitution frequency from the 3' end (x-axis mirrored).
+    Left panel  - C→T substitution frequency from the 5' end.
+    Right panel - G→A substitution frequency from the 3' end (x-axis mirrored).
 
     Both panels overlay:
       • Observed data as a filled curve (coloured area + line)
@@ -667,7 +676,7 @@ def plot_damage_profile(row: pd.Series, wlen: int, outdir: str) -> None:
         f"pmax={_fmt(pmax_disp)}   q={_fmt(qval)}   acc={_fmt(acc)}"
     )
 
-    # ── shared y-axis upper limit ────────────────────────────────────────
+    # -- shared y-axis upper limit ----------------------------------------
     y_upper = max(
         np.nanmax(ct) if not np.all(np.isnan(ct)) else 0,
         np.nanmax(ga) if not np.all(np.isnan(ga)) else 0,
@@ -681,7 +690,7 @@ def plot_damage_profile(row: pd.Series, wlen: int, outdir: str) -> None:
     )
     fig.suptitle(title, fontsize=11, y=1.01)
 
-    # ── helper: draw one panel ───────────────────────────────────────────
+    # -- helper: draw one panel -------------------------------------------
     def _draw_panel(ax, y_obs, colour, end_label):
         # Observed: filled area + solid line
         ax.fill_between(x, 0, y_obs, color=colour, alpha=0.20)
@@ -729,7 +738,7 @@ def plot_damage_profile(row: pd.Series, wlen: int, outdir: str) -> None:
     plt.close(fig)
 
 
-# ── CLI ──────────────────────────────────────────────────────────────────────
+# -- CLI ----------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -742,7 +751,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="MetaPhlAn output TSV (with # header lines)")
     p.add_argument("-s", "--sam", required=True,
                    help="MetaPhlAn SAM file (bz2-compressed)")
-    p.add_argument("-o", "--outdir", default="metaphlan2damage_out",
+    p.add_argument("-o", "--outdir", default="anubis_out",
                    help="Output directory")
 
     # Filters
@@ -766,6 +775,9 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Window length for damage modelling (bp)")
     dam.add_argument("--threads", type=int, default=4,
                      help="CPU threads for sorting / pydamage")
+    dam.add_argument("--min_mapq_val", type=int, default=30, metavar="INT",
+                     help="Minimum mapping quality (MAPQ) for a read to be kept; "
+                          "applied before damage calculation")
 
     # Output options
     out = p.add_argument_group("Output")
@@ -791,14 +803,14 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+# -- Main ---------------------------------------------------------------------
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
 
     os.makedirs(args.outdir, exist_ok=True)
 
-    # ── 1. Parse MetaPhlAn table ──────────────────────────────────────────
+    # -- 1. Parse MetaPhlAn table ------------------------------------------
     log.info("Parsing MetaPhlAn table: %s", args.metaphlan)
     mpa_df = parse_metaphlan(args.metaphlan)
     log.info("  Found %d SGB-level entries", len(mpa_df))
@@ -817,7 +829,7 @@ def main(argv=None):
             if sgb:
                 norm[sgb] = tok
             else:
-                log.warning("Cannot parse clade specifier '%s' — skipping", tok)
+                log.warning("Cannot parse clade specifier '%s' - skipping", tok)
 
         if not norm:
             log.error("No valid clade identifiers could be parsed. Exiting.")
@@ -847,7 +859,7 @@ def main(argv=None):
     target_sgbs = set(mpa_df["sgb_id"])
     log.info("  Target SGBs: %s", ", ".join(sorted(target_sgbs)))
 
-    # ── 2. Split SAM → per-SGB BAMs ──────────────────────────────────────
+    # -- 2. Split SAM → per-SGB BAMs --------------------------------------
     tmpdir = tempfile.mkdtemp(prefix="anubis_", dir=args.outdir)
     try:
         sgb_bams = split_sam_by_sgb(
@@ -855,13 +867,14 @@ def main(argv=None):
             target_sgbs,
             tmpdir,
             threads=args.threads,
+            min_mapq=args.min_mapq_val,
         )
 
         if not sgb_bams:
             log.error("No reads could be routed to any target SGB. Exiting.")
             sys.exit(1)
 
-        # ── 3. Run pydamage ───────────────────────────────────────────────
+        # -- 3. Run pydamage -----------------------------------------------
         log.info("Running PyDamage on %d SGB BAMs …", len(sgb_bams))
         damage_df, read_dicts = analyze_all_sgbs(
             sgb_bams,
@@ -873,14 +886,14 @@ def main(argv=None):
             log.error("PyDamage produced no results. Exiting.")
             sys.exit(1)
 
-        # ── 4. Merge and filter early so rescaling uses the final result ──
+        # -- 4. Merge and filter early so rescaling uses the final result --
         merged_early = mpa_df.merge(damage_df, on="sgb_id", how="inner")
         if args.min_reads is not None:
             merged_early = merged_early[
                 merged_early["nb_reads_aligned"] >= args.min_reads
             ]
 
-        # ── 5. Rescale/mask per-SGB BAMs (no second SAM scan) ────────────
+        # -- 5. Rescale/mask per-SGB BAMs (no second SAM scan) ------------
         _mask_5p = args.mask_5prime or 0
         _mask_3p = args.mask_3prime or 0
         _do_process = args.rescale or _mask_5p > 0 or _mask_3p > 0
@@ -916,7 +929,7 @@ def main(argv=None):
             args.min_reads, len(merged),
         )
 
-    # ── 6. Select and order output columns ───────────────────────────────
+    # -- 6. Select and order output columns -------------------------------
     ct_cols = [f"CtoT-{i}" for i in range(args.wlen) if f"CtoT-{i}" in merged.columns]
     ga_cols = [f"GtoA-{i}" for i in range(args.wlen) if f"GtoA-{i}" in merged.columns]
 
@@ -940,12 +953,12 @@ def main(argv=None):
     )
     result.sort_values("relative_abundance", ascending=False, inplace=True)
 
-    # ── 7. Write output table ─────────────────────────────────────────────
+    # -- 7. Write output table ---------------------------------------------
     out_tsv = os.path.join(args.outdir, "anubis_results.tsv")
     result.to_csv(out_tsv, sep="\t", index=False)
     log.info("Results written to: %s", out_tsv)
 
-    # ── 8. Print summary ──────────────────────────────────────────────────
+    # -- 8. Print summary --------------------------------------------------
     summary_cols = [
         "sgb_id", "species", "relative_abundance",
         "nb_reads_aligned", "coverage",
@@ -954,7 +967,7 @@ def main(argv=None):
     summary_cols = [c for c in summary_cols if c in result.columns]
     print("\n" + result[summary_cols].to_string(index=False) + "\n")
 
-    # ── 9. Damage profile plots ──────────────────────────────────────────
+    # -- 9. Damage profile plots ------------------------------------------
     if args.plot:
         plotdir = os.path.join(args.outdir, "plots")
         os.makedirs(plotdir, exist_ok=True)
