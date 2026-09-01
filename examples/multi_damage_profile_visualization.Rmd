@@ -30,7 +30,7 @@ selected_sgb <- "SGB12664"}
 
 ```{r example-per-sample, eval=FALSE} 
 analysis_mode <- "per_sample" 
-selected_sample <- "Farrer2021_101"}
+selected_sample <- "Sample_123"}
 ```
 
 ## Output
