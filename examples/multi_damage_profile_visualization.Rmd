@@ -1,0 +1,381 @@
+---
+title: "ANUBIS Damage Profile Visualization"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    highlight: tango
+    code_folding: hide
+---
+
+# ANUBIS Damage Profile Visualization
+
+Two analysis modes are supported:
+
+-   per_sgb: one SGB across multiple samples
+-   per_sample: multiple SGBs within one sample
+
+For each mode, the script generates two plots:
+
+1.  single-line damage profiles for each grouping unit
+2.  mean damage profile with ± SD
+
+## Usage examples
+
+```{r example-per-sgb, eval=FALSE} 
+analysis_mode <- "per_sgb" 
+selected_sgb <- "SGB12664"}
+```
+
+```{r example-per-sample, eval=FALSE} 
+analysis_mode <- "per_sample" 
+selected_sample <- "Farrer2021_101"}
+```
+
+## Output
+
+The script creates two PNGs for each target:
+
+-   target_damage_profiles.png
+-   target_damage_mean_sd.png
+
+------------------------------------------------------------------------
+
+## 1) Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(patchwork)
+
+theme_set(theme_bw(base_size = 13))
+```
+
+## 2) User settings
+
+```{r settings}
+# Input file containing the merged ANUBIS table
+input_file <- "merged_anubis_table.tsv"
+
+# Choose one mode:
+#   "per_sgb"    => one SGB across multiple samples
+#   "per_sample" => one sample across multiple SGBs
+analysis_mode <- "per_sample"
+
+# Target SGB used when analysis_mode == "per_sgb"
+selected_sgb <- "SGB1234"
+
+# Target sample used when analysis_mode == "per_sample"
+selected_sample <- "Sample_name"
+
+# Number of positions shown from each read end
+max_position <- 29
+
+# Folder for saved plots
+output_dir <- "plots"
+```
+
+## 3) Load and validate input
+
+```{r load-data, message=FALSE}
+anubis <- read_tsv(input_file, show_col_types = FALSE)
+
+required_columns <- c("sample", "sgb_id")
+missing_columns <- setdiff(required_columns, colnames(anubis))
+
+if (length(missing_columns) > 0) {
+  stop(
+    paste0(
+      "The following required columns are missing: ",
+      paste(missing_columns, collapse = ", ")
+    )
+  )
+}
+
+valid_modes <- c("per_sgb", "per_sample")
+
+if (!analysis_mode %in% valid_modes) {
+  stop(
+    paste0(
+      "Invalid analysis mode: '", analysis_mode, "'. Choose one of: ",
+      paste(valid_modes, collapse = ", ")
+    )
+  )
+}
+```
+
+## 4) Select target data
+
+```{r select-data}
+if (analysis_mode == "per_sgb") {
+  if (!selected_sgb %in% anubis$sgb_id) {
+    stop(paste0("SGB '", selected_sgb, "' was not found in the input table."))
+  }
+
+  selected_data <- anubis %>% filter(sgb_id == selected_sgb)
+  target_name <- selected_sgb
+  group_column <- "sample"
+
+} else {
+  if (!selected_sample %in% anubis$sample) {
+    stop(paste0("Sample '", selected_sample, "' was not found in the input table."))
+  }
+
+  selected_data <- anubis %>% filter(sample == selected_sample)
+  target_name <- selected_sample
+  group_column <- "sgb_id"
+}
+
+cat(
+  "\nAnalysis mode: ", analysis_mode,
+  "\nTarget: ", target_name,
+  "\nRows selected: ", nrow(selected_data),
+  "\n",
+  sep = ""
+)
+```
+
+## 5) Prepare damage data
+
+ANUBIS reports the two read-terminal damage types used here:
+
+-   5' C→T substitutions
+-   3' G→A substitutions
+
+```{r prepare-damage}
+prepare_damage <- function(data, mutation) {
+  prefix <- ifelse(mutation == "CtoT", "CtoT-", "GtoA-")
+
+  data %>%
+    select(sample, sgb_id, starts_with(prefix)) %>%
+    pivot_longer(
+      cols = starts_with(prefix),
+      names_to = "position",
+      values_to = "damage"
+    ) %>%
+    mutate(position = as.numeric(sub(prefix, "", position)))
+}
+
+ctot <- prepare_damage(selected_data, "CtoT")
+gtoa <- prepare_damage(selected_data, "GtoA")
+```
+
+## 6) Plot functions
+
+```{r plot-functions}
+plot_profile <- function(data, end, ymax, group_column, show_legend = FALSE) {
+  if (end == "5") {
+    p <- ggplot(
+      data,
+      aes(x = position, y = damage, group = .data[[group_column]], colour = .data[[group_column]])
+    ) +
+      geom_line(linewidth = 0.9, alpha = 0.7) +
+      scale_x_continuous(limits = c(0, max_position), breaks = seq(0, max_position, by = 5)) +
+      scale_y_continuous(limits = c(0, ymax)) +
+      theme_bw(base_size = 15) +
+      labs(
+        title = "5' C→T",
+        x = "Distance from 5' end (bp)",
+        y = "Misincorporation frequency",
+        colour = NULL
+      ) +
+      theme(
+        legend.position = ifelse(show_legend, "right", "none"),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5)
+      )
+
+  } else {
+    p <- ggplot(
+      data,
+      aes(x = position, y = damage, group = .data[[group_column]], colour = .data[[group_column]])
+    ) +
+      geom_line(linewidth = 0.9, alpha = 0.7) +
+      scale_x_reverse(limits = c(max_position, 0), breaks = seq(0, max_position, by = 5)) +
+      scale_y_continuous(limits = c(0, ymax)) +
+      theme_bw(base_size = 15) +
+      labs(
+        title = "3' G→A",
+        x = "Distance from 3' end (bp)",
+        y = NULL,
+        colour = NULL
+      ) +
+      theme(
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = ifelse(show_legend, "right", "none"),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5)
+      )
+  }
+
+  p
+}
+
+plot_mean_sd <- function(individual_data, average_data, end, ymax) {
+  if (end == "5") {
+    p <- ggplot() +
+      geom_line(
+        data = individual_data,
+        aes(x = position, y = damage, group = .data[[group_column]]),
+        colour = "grey70",
+        alpha = 0.5,
+        linewidth = 0.6
+      ) +
+      geom_ribbon(
+        data = average_data,
+        aes(x = position, ymin = pmax(mean_damage - sd_damage, 0), ymax = mean_damage + sd_damage),
+        fill = "steelblue",
+        alpha = 0.25
+      ) +
+      geom_line(
+        data = average_data,
+        aes(x = position, y = mean_damage),
+        colour = "steelblue",
+        linewidth = 1.4
+      ) +
+      geom_point(
+        data = average_data,
+        aes(x = position, y = mean_damage),
+        colour = "steelblue",
+        size = 2
+      ) +
+      scale_x_continuous(limits = c(0, max_position), breaks = seq(0, max_position, by = 5)) +
+      scale_y_continuous(limits = c(0, ymax)) +
+      theme_bw(base_size = 15) +
+      labs(
+        title = "5' C→T",
+        x = "Distance from 5' end (bp)",
+        y = "Misincorporation frequency"
+      ) +
+      theme(
+        legend.position = "none",
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5)
+      )
+
+  } else {
+    p <- ggplot() +
+      geom_line(
+        data = individual_data,
+        aes(x = position, y = damage, group = .data[[group_column]]),
+        colour = "grey70",
+        alpha = 0.5,
+        linewidth = 0.6
+      ) +
+      geom_ribbon(
+        data = average_data,
+        aes(x = position, ymin = pmax(mean_damage - sd_damage, 0), ymax = mean_damage + sd_damage),
+        fill = "steelblue",
+        alpha = 0.25
+      ) +
+      geom_line(
+        data = average_data,
+        aes(x = position, y = mean_damage),
+        colour = "steelblue",
+        linewidth = 1.4
+      ) +
+      geom_point(
+        data = average_data,
+        aes(x = position, y = mean_damage),
+        colour = "steelblue",
+        size = 2
+      ) +
+      scale_x_reverse(limits = c(max_position, 0), breaks = seq(0, max_position, by = 5)) +
+      scale_y_continuous(limits = c(0, ymax)) +
+      theme_bw(base_size = 15) +
+      labs(
+        title = "3' G→A",
+        x = "Distance from 3' end (bp)",
+        y = NULL
+      ) +
+      theme(
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5)
+      )
+  }
+
+  p
+}
+```
+
+## 7) Summary statistics and plotting limits
+
+```{r summary-statistics}
+average_ctot <- ctot %>%
+  group_by(position) %>%
+  summarise(
+    mean_damage = mean(damage, na.rm = TRUE),
+    sd_damage = sd(damage, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+average_gtoa <- gtoa %>%
+  group_by(position) %>%
+  summarise(
+    mean_damage = mean(damage, na.rm = TRUE),
+    sd_damage = sd(damage, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+ymax_individual <- max(c(ctot$damage, gtoa$damage), na.rm = TRUE)
+ymax_average <- max(
+  c(
+    ctot$damage,
+    gtoa$damage,
+    average_ctot$mean_damage + average_ctot$sd_damage,
+    average_gtoa$mean_damage + average_gtoa$sd_damage
+  ),
+  na.rm = TRUE
+)
+```
+
+## 8) Single-line damage profiles
+
+```{r single-line-plot}
+left_single <- plot_profile(ctot, end = "5", ymax = ymax_individual, group_column = group_column, show_legend = FALSE)
+right_single <- plot_profile(gtoa, end = "3", ymax = ymax_individual, group_column = group_column, show_legend = TRUE)
+
+single_line_plot <- (left_single | right_single) +
+  plot_annotation(title = paste("Damage profiles:", target_name))
+
+single_line_plot
+```
+
+## 9) Mean ± SD plots
+
+```{r mean-sd-plot}
+left_mean <- plot_mean_sd(ctot, average_ctot, end = "5", ymax = ymax_average)
+right_mean <- plot_mean_sd(gtoa, average_gtoa, end = "3", ymax = ymax_average)
+
+mean_sd_plot <- (left_mean | right_mean) +
+  plot_annotation(title = paste("Mean ± SD damage profile:", target_name))
+
+mean_sd_plot
+```
+
+## 10) Save figures
+
+```{r save-plots}
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+}
+
+single_file <- file.path(output_dir, paste0(target_name, "_damage_profiles.png"))
+mean_file <- file.path(output_dir, paste0(target_name, "_damage_mean_sd.png"))
+
+ggsave(filename = single_file, plot = single_line_plot, width = 12, height = 6, dpi = 300)
+ggsave(filename = mean_file, plot = mean_sd_plot, width = 12, height = 6, dpi = 300)
+
+cat(
+  "\nSaved plots:\n\n",
+  single_file,
+  "\n",
+  mean_file,
+  "\n",
+  sep = ""
+)
+```
